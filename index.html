@@ -4032,6 +4032,27 @@
             }));
           }
 
+          if (parsed?.profile) {
+            parsed.profile = {
+              ...defaultData.profile,
+              ...parsed.profile,
+              social: {
+                ...defaultData.profile.social,
+                ...parsed.profile.social,
+              },
+            };
+
+            Object.keys(parsed.profile.social).forEach((key) => {
+              if (
+                parsed.profile.social[key] === "#" ||
+                parsed.profile.social[key] === "" ||
+                parsed.profile.social[key] == null
+              ) {
+                parsed.profile.social[key] = defaultData.profile.social[key];
+              }
+            });
+          }
+
           return parsed;
         } catch (e) {
           localStorage.setItem(STORAGE_KEY, JSON.stringify(defaultData));
