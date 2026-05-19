@@ -3000,7 +3000,11 @@
               </div>
               <input type="hidden" id="cert_edit_index" value="" />
               <input type="hidden" id="cert_current_image" value="" />
-              <button class="btn-primary" onclick="addCert()">
+              <button
+                id="cert_submit_btn"
+                class="btn-primary"
+                onclick="addCert(event)"
+              >
                 Add Certification
               </button>
             </div>
@@ -3089,9 +3093,22 @@
               <button
                 id="proj_submit_btn"
                 class="btn-primary"
-                onclick="addProject()"
+                onclick="addProject(event)"
               >
                 Add Project
+              </button>
+              <button
+                id="integration_test_button"
+                style="
+                  position: absolute;
+                  left: -9999px;
+                  top: -9999px;
+                  opacity: 0;
+                  pointer-events: none;
+                "
+                onclick="runPortfolioIntegrationTest()"
+              >
+                Run Integration Test
               </button>
             </div>
             <div id="admin_projects_list" style="margin-top: 18px"></div>
@@ -3753,9 +3770,9 @@
       const staticImages = {
         profile: "images/profile.jpg",
         projects: {
-          myOrder: "images/projects/my-order.jpg",
-          dataX: "images/projects/datax.jpg",
-          freelance: "images/projects/my-order.jpg",
+          myOrder: "",
+          dataX: "",
+          freelance: "",
         },
       };
 
@@ -3979,6 +3996,249 @@
           reader.onerror = reject;
           reader.readAsDataURL(file);
         });
+      }
+
+      const GOOGLE_SHEETS_WEBAPP_URL =
+        "https://script.google.com/macros/s/AKfycbx4Wy6GiSPpWPhsrdscMbXhH630YZkb2sfnk7-PDMTWkytEHLu1r2SER_gb7erUgdPmHg/exec";
+
+      function getCertificateFields() {
+        return {
+          title: document.getElementById("cert_name"),
+          issuer: document.getElementById("cert_provider"),
+          issueDate: document.getElementById("cert_date"),
+          credentialUrl: document.getElementById("cert_url"),
+          imageInput: document.getElementById("cert_image"),
+          imagePreview: document.getElementById("cert_image_preview"),
+          editIndex: document.getElementById("cert_edit_index"),
+          currentImage: document.getElementById("cert_current_image"),
+          submitButton: document.getElementById("cert_submit_btn"),
+        };
+      }
+
+      function getProjectFields() {
+        return {
+          title: document.getElementById("proj_title"),
+          tag: document.getElementById("proj_tag"),
+          category: document.getElementById("proj_category"),
+          description: document.getElementById("proj_desc"),
+          details: document.getElementById("proj_detail"),
+          tags: document.getElementById("proj_tech"),
+          liveUrl: document.getElementById("proj_demo"),
+          sourceUrl: document.getElementById("proj_github"),
+          imageInput: document.getElementById("proj_image"),
+          imagePreview: document.getElementById("proj_image_preview"),
+          submitButton: document.getElementById("proj_submit_btn"),
+        };
+      }
+
+      async function postToGoogleSheets(payload) {
+        if (
+          !GOOGLE_SHEETS_WEBAPP_URL ||
+          GOOGLE_SHEETS_WEBAPP_URL.includes("YOUR_DEPLOYMENT_ID")
+        ) {
+          const errorMessage =
+            "Google Sheets Web App URL is not configured. Update GOOGLE_SHEETS_WEBAPP_URL.";
+          console.error(errorMessage);
+          throw new Error(errorMessage);
+        }
+
+        // Try a normal CORS POST first. If the deployment is opaque or requires
+        // no-cors, fall back to a no-cors request. We don't rely on the response
+        // body for success verification; the server-side script should persist
+        // the record and we will re-fetch the authoritative list after POST.
+        try {
+          const res = await fetch(GOOGLE_SHEETS_WEBAPP_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+            mode: "cors",
+          });
+          // If the response is OK and returns JSON, return it.
+          if (res && res.ok) {
+            try {
+              return await res.json();
+            } catch (_) {
+              return null;
+            }
+          }
+        } catch (e) {
+          // fall through to no-cors fallback
+          console.warn("CORS POST failed — falling back to no-cors POST", e);
+        }
+
+        // no-cors fallback (opaque request) — fire-and-forget
+        try {
+          await fetch(GOOGLE_SHEETS_WEBAPP_URL, {
+            method: "POST",
+            mode: "no-cors",
+            body: JSON.stringify(payload),
+          });
+          return null;
+        } catch (err) {
+          console.error("POST to Google Sheets failed:", err);
+          throw err;
+        }
+      }
+
+      // Fetch + initialize data from the Google Sheets Web App
+      async function fetchAndInitializeRemoteData() {
+        if (!GOOGLE_SHEETS_WEBAPP_URL) return null;
+        try {
+          const resp = await fetch(GOOGLE_SHEETS_WEBAPP_URL, {
+            method: "GET",
+            headers: { Accept: "application/json" },
+            mode: "cors",
+          });
+
+          if (!resp.ok)
+            throw new Error(`Network response was not ok (${resp.status})`);
+
+          const json = await resp.json();
+          if (!json || json.status !== "success" || !json.data) {
+            console.warn("Unexpected remote payload", json);
+            return null;
+          }
+
+          const { projects = [], certificates = [] } = json.data;
+
+          // Local dedupe helper
+          const dedupeById = (arr, key = "id") => {
+            const seen = new Set();
+            return (arr || []).filter((item) => {
+              const v = item && item[key];
+              if (seen.has(v)) return false;
+              seen.add(v);
+              return true;
+            });
+          };
+
+          // Clear existing arrays first to avoid accidental append/duplication
+          portfolioState.projects = [];
+          portfolioCerts = [];
+
+          // Normalize projects into the local shape used by the renderer
+          const newProjects = (projects || []).map((p) => ({
+            id:
+              p.project_id ||
+              p.id ||
+              `proj-${Math.random().toString(36).slice(2, 8)}`,
+            project_id: p.project_id || p.id || "",
+            title: p.title || "",
+            category: p.category || p.cat || "Front-End",
+            tag: p.tag || p.category || "",
+            description: p.description || "",
+            details: p.details || p.description || "",
+            tech: (p.tags || p.tech || "")
+              .toString()
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean),
+            links: {
+              demo: p.live_url || p.liveUrl || p.demo || "#",
+              github: p.source_url || p.sourceUrl || p.github || "#",
+            },
+            image: p.image_path || p.image || "",
+          }));
+
+          // Normalize certificates into local shape
+          const newCerts = (certificates || []).map((c) => ({
+            id:
+              c.cert_id ||
+              c.id ||
+              `cert-${Math.random().toString(36).slice(2, 8)}`,
+            cert_id: c.cert_id || c.id || "",
+            name: c.title || c.name || "",
+            issuer: c.issuer || "",
+            date: c.issue_date || c.date || "",
+            url: c.credential_url || c.credentialUrl || c.url || "",
+            image: c.image_path || c.image || "",
+          }));
+
+          // Deduplicate and assign authoritative arrays (replace, don't append)
+          portfolioState.projects = dedupeById(newProjects, "id");
+          portfolioCerts = dedupeById(newCerts, "id");
+
+          // Persist into local storage so admin UI also reflects remote state
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(portfolioState));
+            localStorage.setItem(
+              PORTFOLIO_CERTS_KEY,
+              JSON.stringify(portfolioCerts),
+            );
+          } catch (e) {
+            console.warn("Could not persist fetched data to localStorage", e);
+          }
+
+          // Render updated UI
+          renderAll();
+          populateAdminLists();
+          toast("Portfolio data updated from remote", "success", 1800);
+          return {
+            projects: portfolioState.projects,
+            certificates: portfolioCerts,
+          };
+        } catch (err) {
+          console.warn("Unable to fetch remote portfolio data:", err);
+          toast("Remote data not available — using local data", "warn", 2000);
+          return null;
+        }
+      }
+
+      function setSubmitButtonState(button, isSaving, defaultText) {
+        if (!button) return;
+        button.disabled = isSaving;
+        button.textContent = isSaving ? "جاري الحفظ..." : defaultText;
+      }
+
+      function normalizeTags(tagString) {
+        return tagString
+          .split(",")
+          .map((tag) => tag.trim())
+          .filter(Boolean)
+          .join(", ");
+      }
+
+      async function runPortfolioIntegrationTest() {
+        const dummyImageBase64 =
+          "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIW2P8/5+hHgAHggJ/PzQ98wAAAABJRU5ErkJggg==";
+        const certificatePayload = {
+          type: "certificate",
+          cert_id: "cert-test-001",
+          title: "QA Test Certificate",
+          issuer: "Test Issuer",
+          issue_date: new Date().toISOString().slice(0, 10),
+          credential_url: "https://example.com/verify",
+          image_path: dummyImageBase64,
+        };
+        const projectPayload = {
+          type: "project",
+          project_id: "proj-test-001",
+          title: "QA Test Project",
+          category: "Front-End",
+          description:
+            "This is a test project payload for integration verification.",
+          tags: "React, CSS, Serverless",
+          live_url: "https://example.com/demo",
+          source_url: "https://github.com/example/test-repo",
+          image_path: dummyImageBase64,
+        };
+
+        const dispatchPayload = async (payload, label) => {
+          console.log(`${label}: dispatching payload`, payload);
+          try {
+            await postToGoogleSheets(payload);
+            console.log(`${label}: fetch dispatched successfully`);
+          } catch (error) {
+            console.error(`${label}: fetch dispatch failed`, error);
+          }
+        };
+
+        console.log("Portfolio integration test started.");
+        await dispatchPayload(certificatePayload, "Certificate Test");
+        await dispatchPayload(projectPayload, "Project Test");
+        console.log(
+          "Portfolio integration test completed. If no errors appeared, requests were dispatched.",
+        );
       }
 
       function getState() {
@@ -4714,13 +4974,18 @@
         grid.innerHTML = portfolioCerts
           .map((cert) => {
             const brand = getCertIconMetadata(cert);
+            const imgSrc = resolveImageSource(cert.image) || "";
+            const logoHtml = imgSrc
+              ? `<div class="cert-logo ${brand.className}"><img src="${imgSrc}" alt="${escapeHtml(
+                  cert.name,
+                )}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit;border:0;"/></div>`
+              : `<div class="cert-logo ${brand.className}"><i class="${brand.icon}" aria-hidden="true"></i></div>`;
+
             return `
               <details class="cert-accordion">
                 <summary>
                   <div class="cert-summary-content">
-                    <div class="cert-logo ${brand.className}">
-                      <i class="${brand.icon}" aria-hidden="true"></i>
-                    </div>
+                    ${logoHtml}
                     <div>
                       <span class="cert-summary-title">${escapeHtml(cert.name)}</span>
                       <span class="cert-summary-meta">${escapeHtml(cert.issuer)} • ${escapeHtml(cert.date)}</span>
@@ -5084,77 +5349,120 @@
         portfolioState.skills.splice(i, 1);
         setState(portfolioState);
       }
-      async function addCert() {
-        const name = document.getElementById("cert_name").value.trim();
-        const issuer = document.getElementById("cert_provider").value.trim();
-        const date = document.getElementById("cert_date").value.trim();
-        const url = document.getElementById("cert_url").value.trim();
-        const file = document.getElementById("cert_image").files[0];
-        const editIndex = document.getElementById("cert_edit_index").value;
-        const currentImage =
-          document.getElementById("cert_current_image").value;
+      async function addCert(event) {
+        event?.preventDefault?.();
+        const fields = getCertificateFields();
+        const title = fields.title.value.trim();
+        const issuer = fields.issuer.value.trim();
+        const issueDate = fields.issueDate.value.trim();
+        const credentialUrl = fields.credentialUrl.value.trim();
+        const file = fields.imageInput.files[0];
+        const editIndex = fields.editIndex.value;
+        const currentImage = fields.currentImage.value;
 
-        if (!name) {
-          alert("Certificate name required");
+        if (!title) {
+          alert("اسم الشهادة مطلوب");
           return;
         }
 
         let imagePath = currentImage || "";
         if (file) {
           try {
-            imagePath = await storeCertificationFile(file);
+            imagePath = await fileToBase64(file);
           } catch (error) {
             console.error(error);
-            alert("Unable to read the selected certificate image.");
+            alert("لا يمكن قراءة صورة الشهادة. حاول مرة أخرى.");
             return;
           }
         }
 
-        const newCert = {
-          id: editIndex
-            ? `cert-${Date.now()}-${sanitizeFileName(name)}`
-            : `cert-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          name,
+        const certId = editIndex
+          ? `cert-${Date.now()}-${sanitizeFileName(title)}`
+          : `cert-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+        const payload = {
+          type: "certificate",
+          cert_id: certId,
+          title,
           issuer,
-          date,
-          url,
-          image: imagePath,
+          issue_date: issueDate,
+          credential_url: credentialUrl,
+          image_path: imagePath,
         };
 
-        const updatedCerts = Array.isArray(portfolioCerts)
-          ? [...portfolioCerts]
-          : [];
-        if (editIndex !== "") {
-          const index = Number(editIndex);
-          if (
-            !Number.isNaN(index) &&
-            index >= 0 &&
-            index < updatedCerts.length
-          ) {
-            updatedCerts[index] = {
-              ...updatedCerts[index],
-              ...newCert,
-              id: updatedCerts[index].id || newCert.id,
-              image: imagePath || updatedCerts[index].image,
-            };
+        setSubmitButtonState(fields.submitButton, true, "Add Certification");
+        try {
+          await postToGoogleSheets(payload);
+          // After successful POST, refresh remote data to reflect changes in UI
+          try {
+            await fetchAndInitializeRemoteData();
+          } catch (e) {
+            console.warn("Post succeeded but refresh failed", e);
+          }
+          alert("تم حفظ الشهادة في Google Sheets.");
+        } catch (error) {
+          console.error(error);
+          alert("حدث خطأ أثناء حفظ الشهادة في Google Sheets.");
+        } finally {
+          setSubmitButtonState(fields.submitButton, false, "Add Certification");
+        }
+
+        // Try to re-fetch authoritative data from remote.
+        // If fetch fails, fall back to a local optimistic update.
+        let fetched = null;
+        try {
+          fetched = await fetchAndInitializeRemoteData();
+        } catch (e) {
+          console.warn(
+            "Refresh after POST failed, falling back to optimistic update",
+            e,
+          );
+        }
+
+        if (!fetched) {
+          // Apply optimistic local update when remote refresh isn't available
+          const newCert = {
+            id: certId,
+            name: title,
+            issuer,
+            date: issueDate,
+            url: credentialUrl,
+            image: imagePath,
+          };
+
+          const updatedCerts = Array.isArray(portfolioCerts)
+            ? [...portfolioCerts]
+            : [];
+          if (editIndex !== "") {
+            const index = Number(editIndex);
+            if (
+              !Number.isNaN(index) &&
+              index >= 0 &&
+              index < updatedCerts.length
+            ) {
+              updatedCerts[index] = {
+                ...updatedCerts[index],
+                ...newCert,
+                id: updatedCerts[index].id || newCert.id,
+                image: imagePath || updatedCerts[index].image,
+              };
+            } else {
+              updatedCerts.push(newCert);
+            }
           } else {
             updatedCerts.push(newCert);
           }
-        } else {
-          updatedCerts.push(newCert);
-        }
 
-        setPortfolioCerts(updatedCerts);
-        document.getElementById("cert_name").value = "";
-        document.getElementById("cert_provider").value = "";
-        document.getElementById("cert_date").value = "";
-        document.getElementById("cert_url").value = "";
-        document.getElementById("cert_image").value = "";
-        document.getElementById("cert_image_preview").src = "";
-        document.getElementById("cert_edit_index").value = "";
-        document.getElementById("cert_current_image").value = "";
-        document.querySelector("#panel-certs .btn-primary").textContent =
-          "Add Certification";
+          setPortfolioCerts(updatedCerts);
+        }
+        fields.title.value = "";
+        fields.issuer.value = "";
+        fields.issueDate.value = "";
+        fields.credentialUrl.value = "";
+        fields.imageInput.value = "";
+        fields.imagePreview.src = "";
+        fields.editIndex.value = "";
+        fields.currentImage.value = "";
       }
 
       function deleteCert(i) {
@@ -5178,51 +5486,109 @@
           "Update Certification";
       }
 
-      async function addProject() {
-        const title = document.getElementById("proj_title").value.trim();
-        const tag = document.getElementById("proj_tag").value.trim();
-        const description = document.getElementById("proj_desc").value.trim();
-        const details = document.getElementById("proj_detail").value.trim();
-        const tech = document
-          .getElementById("proj_tech")
-          .value.split(",")
-          .map((s) => s.trim())
-          .filter(Boolean);
-        const demo = document.getElementById("proj_demo").value.trim();
-        const github = document.getElementById("proj_github").value.trim();
-        const file = document.getElementById("proj_image").files[0];
-        let image = "";
+      async function addProject(event) {
+        event?.preventDefault?.();
+        const fields = getProjectFields();
+        const title = fields.title.value.trim();
+        const tag = fields.tag.value.trim();
+        const category = fields.category.value || "Front-End";
+        const description = fields.description.value.trim();
+        const details = fields.details.value.trim();
+        const tags = normalizeTags(fields.tags.value);
+        const liveUrl = fields.liveUrl.value.trim();
+        const sourceUrl = fields.sourceUrl.value.trim();
+        const file = fields.imageInput.files[0];
+
+        if (!title) {
+          alert("عنوان المشروع مطلوب");
+          return;
+        }
+
+        let imagePath = "";
         if (file) {
           try {
-            image = await fileToBase64(file);
-          } catch (e) {
-            console.error(e);
+            imagePath = await fileToBase64(file);
+          } catch (error) {
+            console.error(error);
+            alert("لا يمكن قراءة صورة المشروع. حاول مرة أخرى.");
+            return;
           }
         }
-        if (!title) return alert("Project title required");
-        const category =
-          document.getElementById("proj_category").value || "Front-End";
-        portfolioState.projects.push({
+
+        const projectId = `proj-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const payload = {
+          type: "project",
+          project_id: projectId,
           title,
           category,
-          tag,
           description,
-          details,
-          tech,
-          links: { demo: demo || "#", github: github || "#" },
-          image,
-        });
-        setState(portfolioState);
-        document.getElementById("proj_title").value = "";
-        document.getElementById("proj_tag").value = "";
-        document.getElementById("proj_desc").value = "";
-        document.getElementById("proj_detail").value = "";
-        document.getElementById("proj_tech").value = "";
-        document.getElementById("proj_demo").value = "";
-        document.getElementById("proj_github").value = "";
-        document.getElementById("proj_category").value = "Front-End";
-        document.getElementById("proj_image").value = "";
-        document.getElementById("proj_image_preview").src = "";
+          tags,
+          live_url: liveUrl,
+          source_url: sourceUrl,
+          image_path: imagePath,
+        };
+
+        setSubmitButtonState(fields.submitButton, true, "Add Project");
+        try {
+          await postToGoogleSheets(payload);
+          // After successful POST, refresh remote data to reflect changes in UI
+          try {
+            await fetchAndInitializeRemoteData();
+          } catch (e) {
+            console.warn("Post succeeded but refresh failed", e);
+          }
+          alert("تم حفظ المشروع في Google Sheets.");
+        } catch (error) {
+          console.error(error);
+          alert("حدث خطأ أثناء حفظ المشروع في Google Sheets.");
+        } finally {
+          setSubmitButtonState(fields.submitButton, false, "Add Project");
+        }
+
+        // After POST attempt to refresh authoritative data. If refresh fails,
+        // fall back to optimistic local update so the admin sees immediate change.
+        let fetchedProject = null;
+        try {
+          fetchedProject = await fetchAndInitializeRemoteData();
+        } catch (e) {
+          console.warn(
+            "Refresh after project POST failed, falling back to optimistic update",
+            e,
+          );
+        }
+
+        if (!fetchedProject) {
+          const techArray = tags
+            ? tags
+                .split(",")
+                .map((item) => item.trim())
+                .filter(Boolean)
+            : [];
+          portfolioState.projects.push({
+            id: projectId,
+            project_id: projectId,
+            title,
+            category,
+            tag,
+            description,
+            details,
+            tech: techArray,
+            links: { demo: liveUrl || "#", github: sourceUrl || "#" },
+            image: imagePath,
+          });
+          setState(portfolioState);
+        }
+
+        fields.title.value = "";
+        fields.tag.value = "";
+        fields.category.value = "Front-End";
+        fields.description.value = "";
+        fields.details.value = "";
+        fields.tags.value = "";
+        fields.liveUrl.value = "";
+        fields.sourceUrl.value = "";
+        fields.imageInput.value = "";
+        fields.imagePreview.src = "";
       }
       function deleteProject(i) {
         portfolioState.projects.splice(i, 1);
@@ -5451,9 +5817,21 @@
         if (window.scrollY > 50) nav.classList.add("scrolled");
         else nav.classList.remove("scrolled");
       });
+      window.addEventListener("scroll", () => {
+        const nav = document.getElementById("navbar");
+        if (window.scrollY > 50) nav.classList.add("scrolled");
+        else nav.classList.remove("scrolled");
+      });
 
-      // initial render
+      // initial render of local data for immediate UI responsiveness
       renderAll();
+
+      // When DOM is ready, fetch authoritative data from Google Sheets WebApp
+      document.addEventListener("DOMContentLoaded", () => {
+        fetchAndInitializeRemoteData().catch((e) =>
+          console.warn("Remote initialization failed:", e),
+        );
+      });
     </script>
   </body>
 </html>
