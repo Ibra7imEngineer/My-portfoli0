@@ -206,10 +206,11 @@
         background: rgba(10, 10, 15, 0.9);
       }
       .nav-container {
-        width: min(100%, 1140px);
-        max-width: 100%;
+        width: 100%;
+        /* allow expansion on very large screens while keeping centered content */
+        max-width: 1800px;
         margin: 0 auto;
-        padding: 0 16px;
+        padding: 0 24px;
         display: flex;
         justify-content: space-between;
         align-items: center;
@@ -354,10 +355,11 @@
       .main-content {
         position: relative;
         z-index: 2;
-        width: min(100%, 1140px);
-        max-width: 100%;
+        width: 100%;
+        /* allow broader layouts on wide displays while remaining centered */
+        max-width: 1800px;
         margin: 0 auto;
-        padding: 120px 16px 60px;
+        padding: 120px 24px 60px;
       }
       @media (min-width: 768px) {
         .main-content {
@@ -1200,6 +1202,21 @@
         padding: 0 5px;
       }
       .certifications-drawer.expanded {
+        max-height: 2000px;
+        opacity: 1;
+        margin-top: 20px;
+      }
+      /* Projects drawer mirrors certifications drawer behavior */
+      .projects-drawer {
+        max-height: 0;
+        overflow: hidden;
+        transition:
+          max-height 0.5s cubic-bezier(0.4, 0, 0.2, 1),
+          opacity 0.5s ease;
+        opacity: 0;
+        padding: 0 5px;
+      }
+      .projects-drawer.expanded {
         max-height: 2000px;
         opacity: 1;
         margin-top: 20px;
@@ -2390,6 +2407,115 @@
         pointer-events: none;
       }
     </style>
+    <style>
+      /* Dedicated print rules for A4 PDF export: overrides earlier print rules */
+      @media print {
+        @page { size: A4; margin: 15mm 12mm; }
+
+        html, body {
+          background: #ffffff !important;
+          color: #1a1a1a !important;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+          font-size: 10.5pt !important;
+          line-height: 1.18 !important;
+          height: auto !important;
+          overflow: visible !important;
+        }
+
+        /* Remove non-essential UI for clean print */
+        .nav-glass,
+        .nav-container,
+        .nav-logo,
+        .nav-links,
+        .nav-select,
+        .nav-admin-btn,
+        .cv-select-row,
+        .cv-download,
+        .btn-primary,
+        .admin-overlay,
+        #toastContainer,
+        .grid-overlay,
+        .ambient-bg,
+        .admin-dashboard {
+          display: none !important;
+        }
+
+        /* Flatten multi-column/grid layouts to a single readable flow */
+        .cv-container,
+        .cv-sheet,
+        .cv-card,
+        .cv-resume-grid {
+          display: block !important;
+          width: 100% !important;
+          grid-template-columns: none !important;
+          gap: 0 !important;
+          padding: 0 !important;
+          margin: 0 !important;
+          border: none !important;
+          box-shadow: none !important;
+        }
+        .cv-sheet { padding: 6mm !important; }
+        .cv-sheet-header {
+          display: flex !important;
+          flex-direction: row !important;
+          align-items: center !important;
+          gap: 8mm !important;
+          padding-bottom: 4mm !important;
+          border-bottom: 1px solid #dddddd !important;
+          margin-bottom: 6mm !important;
+        }
+        .cv-title-group { order: 1 !important; flex: 1 1 auto !important; }
+        .cv-download { display: none !important; }
+        .cv-main { order: 2 !important; width: 100% !important; float: none !important; }
+        .cv-sidebar { order: 3 !important; width: 100% !important; margin-top: 6mm !important; float: none !important; }
+
+        /* Profile image and heading alignment */
+        .profile-frame, #profileImg {
+          width: 84px !important;
+          height: 84px !important;
+          border-radius: 50% !important;
+          display: block !important;
+          float: left !important;
+          margin-right: 10px !important;
+          margin-bottom: 0 !important;
+        }
+
+        /* Typography tuned for print */
+        h1, .hero-name, .cv-name { font-size: 16pt !important; color: #1a1a1a !important; margin: 0 0 2mm 0 !important; }
+        h2, h3, .section-title, .cv-section h4 { font-size: 14pt !important; color: #1a1a1a !important; margin: 4mm 0 2mm 0 !important; }
+        p, li, span, .cv-role, .cv-contact-list span, .cv-contact-list a { font-size: 10pt !important; color: #1a1a1a !important; }
+
+        /* Page-break controls: avoid breaking inside items and prevent orphan headings */
+        .cv-experience-item,
+        .cv-education,
+        .cv-skill-group,
+        .cv-skill-list li,
+        .work-item,
+        .education-item,
+        .skill-item {
+          page-break-inside: avoid !important;
+          break-inside: avoid !important;
+          margin-bottom: 3mm !important;
+        }
+        .cv-section h4, .section-title { page-break-after: avoid !important; break-after: avoid !important; }
+        h2, h3, h4, .section-title { orphans: 3; widows: 3; }
+
+        /* Compact spacing to help fit content neatly on A4 */
+        .section, .cv-section { margin-bottom: 4mm !important; padding-bottom: 0 !important; border-bottom: none !important; }
+        .cv-contact-list li, .cv-experience-item { margin-bottom: 3mm !important; }
+
+        /* Images and links */
+        img { max-width: 100% !important; height: auto !important; }
+        a { color: #1a1a1a !important; text-decoration: none !important; }
+
+        /* Ensure no floats or overlapping */
+        .float, .left, .right { float: none !important; }
+
+        /* Force printer color adjustments */
+        html, body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      }
+    </style>
   </head>
   <body>
     <div class="ambient-bg">
@@ -2665,33 +2791,78 @@
           Featured Projects
           <span class="title-line"></span>
         </h2>
-        <div class="project-filter-bar">
-          <button
-            type="button"
-            class="filter-tab active"
-            data-filter="All"
-            onclick="setProjectFilter('All')"
-          >
-            All
-          </button>
-          <button
-            type="button"
-            class="filter-tab"
-            data-filter="Data Analysis"
-            onclick="setProjectFilter('Data Analysis')"
-          >
-            Data Analysis
-          </button>
-          <button
-            type="button"
-            class="filter-tab"
-            data-filter="Front-End"
-            onclick="setProjectFilter('Front-End')"
-          >
-            Front-End
+        <div
+          class="certifications-header-bar"
+          onclick="toggleProjectsDrawer()"
+          id="projectsHeaderBar"
+          role="button"
+          aria-expanded="false"
+        >
+          <div style="display: flex; align-items: center; gap: 14px">
+            <div
+              style="
+                width: 42px;
+                height: 42px;
+                border-radius: 14px;
+                background: rgba(255, 255, 255, 0.06);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: var(--neon-purple);
+                font-size: 1.1rem;
+              "
+            >
+              <i class="fas fa-rocket"></i>
+            </div>
+            <div>
+              <div
+                style="
+                  font-size: 1rem;
+                  font-weight: 700;
+                  color: var(--text-primary);
+                "
+              >
+                Featured Projects
+              </div>
+              <div style="font-size: 0.85rem; color: var(--text-muted)">
+                Expand to view filters and project previews.
+              </div>
+            </div>
+          </div>
+          <button type="button" class="btn-primary" id="projectsToggleButton">
+            <span id="projectsToggleLabel">View Projects</span>
+            <span class="chevron-icon" id="projectsChevronIcon">↓</span>
           </button>
         </div>
-        <div class="projects-list" id="projectsList"></div>
+        <div class="projects-drawer" id="projectsDrawer">
+          <div class="project-filter-bar">
+            <button
+              type="button"
+              class="filter-tab active"
+              data-filter="All"
+              onclick="setProjectFilter('All')"
+            >
+              All
+            </button>
+            <button
+              type="button"
+              class="filter-tab"
+              data-filter="Data Analysis"
+              onclick="setProjectFilter('Data Analysis')"
+            >
+              Data Analysis
+            </button>
+            <button
+              type="button"
+              class="filter-tab"
+              data-filter="Front-End"
+              onclick="setProjectFilter('Front-End')"
+            >
+              Front-End
+            </button>
+          </div>
+          <div class="projects-list" id="projectsList"></div>
+        </div>
       </section>
 
       <footer class="footer">
@@ -5025,6 +5196,19 @@
           label.textContent = expanded
             ? "Hide Credentials"
             : "View All Credentials";
+        if (header)
+          header.setAttribute("aria-expanded", expanded ? "true" : "false");
+      }
+
+      function toggleProjectsDrawer() {
+        const drawer = document.getElementById("projectsDrawer");
+        const chevron = document.getElementById("projectsChevronIcon");
+        const label = document.getElementById("projectsToggleLabel");
+        const header = document.getElementById("projectsHeaderBar");
+        const expanded = drawer.classList.toggle("expanded");
+        if (chevron) chevron.classList.toggle("rotated", expanded);
+        if (label)
+          label.textContent = expanded ? "Hide Projects" : "View Projects";
         if (header)
           header.setAttribute("aria-expanded", expanded ? "true" : "false");
       }
